@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>局域网共享文件系统</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #e0f7fa;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            width: 300px;
+            max-height: 90vh;
+            /* 限制容器高度 */
+            overflow: hidden;
+            /* 防止内容溢出 */
+            display: flex;
+            flex-direction: column;
+        }
+
+        h1 {
+            text-align: center;
+            color: #0097a7;
+        }
+
+        form {
+            margin-top: 20px;
+        }
+
+        input[type="file"] {
+            margin-bottom: 10px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        button {
+            width: 100%;
+            padding: 10px;
+            background-color: #26c6da;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            margin-top: 20px;
+        }
+
+        button:hover {
+            background-color: #00acc1;
+        }
+
+        #result {
+            margin-top: 20px;
+            text-align: center;
+            color: #333;
+        }
+
+        #fileList {
+            margin-top: 20px;
+            text-align: left;
+            color: #333;
+            flex-grow: 1;
+            /* 文件列表占据剩余空间 */
+            overflow-y: auto;
+            /* 启用垂直滚动 */
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 10px;
+        }
+
+        #fileList ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        #fileList li {
+            margin: 5px 0;
+            padding: 8px;
+            background-color: #f1f8e9;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            transition: transform 0.3s ease;
+        }
+
+        #fileList li:hover {
+            transform: scale(1.02);
+        }
+
+        #progressContainer {
+            margin-top: 20px;
+            width: 100%;
+            background-color: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        #progressBar {
+            width: 0;
+            height: 20px;
+            background-color: #26c6da;
+            transition: width 0.3s ease;
+        }
+
+        #stopButton {
+            width: 100%;
+            padding: 10px;
+            background-color: #ca4e4e;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            margin-top: 20px;
+        }
+
+        #stopButton:hover {
+            background-color: #d67474;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>局域网共享文件系统</h1>
+        <form id="uploadForm" enctype="multipart/form-data">
+            <!-- <input type="file" name="file" required> -->
+            <button id="stopButton" type="button">停止</button>
+            <button type="submit">上传文件</button>
+        </form>
+        <form id="downloadForm">
+            <input type="text" name="filename" placeholder="请输入文件名" required>
+            <button type="submit">下载文件</button>
+        </form>
+        <button id="closeButton">清空文件</button>
+        <div id="result"></div>
+        <div id="progressContainer">
+            <div id="progressBar"></div>
+        </div>
+        <div id="fileList">
+            <h3>文件列表</h3>
+            <ul id="fileListItems"></ul>
+        </div>
+    </div>
+    <script>
+        let currentXHR = null; // 保存当前的上传或下载请求
+
+        const uploadForm = document.getElementById('uploadForm');
+        const fileInput = document.createElement('input'); // 动态创建文件选择框
+        fileInput.type = 'file'; // 设置为文件选择框
+        fileInput.style.display = 'none'; // 隐藏文件选择框
+        uploadForm.appendChild(fileInput); // 将文件选择框添加到表单中
+
+        const uploadButton = uploadForm.querySelector('button[type="submit"]');
+        const resultDiv = document.getElementById('result');
+        const fileListItems = document.getElementById('fileListItems');
+        const progressBar = document.getElementById('progressBar');
+        const downloadForm = document.getElementById('downloadForm');
+        const downloadButton = downloadForm.querySelector('button[type="submit"]');
+        const downloadInput = downloadForm.querySelector('input[name="filename"]'); // 获取下载框的输入框
+        const closeButton = document.getElementById('closeButton');
+        const stopButton = document.getElementById('stopButton'); // 获取停止按钮
+
+        const baseURL = 'http://172.22.160.111:8088'; // 基础 URL
+        const maxFileSize = 5 * 1024 * 1024 * 1024; // 最大文件大小 5GB
+
+        // 禁用按钮
+        function disableButtons() {
+            uploadButton.disabled = true;
+            downloadButton.disabled = true;
+            closeButton.disabled = true;
+            uploadButton.textContent = '正在上传...';
+        }
+
+        // 启用按钮
+        function enableButtons() {
+            uploadButton.disabled = false;
+            downloadButton.disabled = false;
+            closeButton.disabled = false;
+            uploadButton.textContent = '上传文件';
+        }
+
+        // 点击上传按钮时自动触发文件选择框
+        uploadButton.addEventListener('click', (e) => {
+            e.preventDefault(); // 阻止默认提交行为
+            fileInput.click(); // 自动触发文件选择框
+        });
+
+        // 文件选择完成后自动上传
+        fileInput.addEventListener('change', async () => {
+            const file = fileInput.files[0];
+
+            // 检查文件大小
+            if (file.size > maxFileSize) {
+                resultDiv.textContent = '文件大小超过限制（最大 5GB）';
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file); // 将文件添加到 FormData 中
+
+            const xhr = new XMLHttpRequest();
+            currentXHR = xhr; // 保存当前的上传请求
+
+            xhr.open('POST', `${baseURL}/file`, true);
+
+            // 禁用按钮
+            disableButtons();
+
+            // 更新进度条
+            xhr.upload.onprogress = (event) => {
+                if (event.lengthComputable) {
+                    const percentComplete = (event.loaded / event.total) * 100;
+                    progressBar.style.width = percentComplete + '%';
+                }
+            };
+
+            // 上传完成处理
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    const data = JSON.parse(xhr.responseText);
+                    resultDiv.textContent = data.message;
+
+                    // 添加文件名到列表
+                    if (data.filename) {
+                        const li = document.createElement('li');
+                        li.textContent = data.filename;
+                        li.addEventListener('click', () => {
+                            downloadInput.value = data.filename; // 点击文件名自动填入下载框
+                        });
+                        fileListItems.appendChild(li);
+                    }
+                } else {
+                    resultDiv.textContent = '上传文件失败';
+                }
+
+                // 重置进度条
+                progressBar.style.width = '0%';
+
+                // 启用按钮
+                enableButtons();
+                currentXHR = null;
+            };
+
+            // 上传失败处理
+            xhr.onerror = () => {
+                resultDiv.textContent = '上传文件失败';
+
+                // 重置进度条
+                progressBar.style.width = '0%';
+
+                // 启用按钮
+                enableButtons();
+                currentXHR = null;
+            };
+
+            xhr.send(formData);
+        });
+
+        // 页面加载时从后端接口 /list 获取文件名并显示
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const response = await fetch(`${baseURL}/list`);
+                if (response.status === 200) {
+                    const data = await response.json(); // 解析 JSON 数据
+                    const fileNames = data.files; // 提取文件名数组
+                    if (Array.isArray(fileNames)) {
+                        fileNames.forEach(filename => {
+                            const li = document.createElement('li');
+                            li.textContent = filename;
+                            li.addEventListener('click', () => {
+                                downloadInput.value = filename; // 点击文件名自动填入下载框
+                            });
+                            fileListItems.appendChild(li);
+                        });
+                    } else {
+                        resultDiv.textContent = '文件列表格式错误';
+                    }
+                } else {
+                    resultDiv.textContent = '无法获取文件列表';
+                }
+            } catch (error) {
+                resultDiv.textContent = '获取文件列表失败';
+            }
+        });
+
+        // 下载文件带进度条
+        downloadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(downloadForm);
+            const filename = formData.get('filename');
+
+            try {
+                const response = await fetch(`${baseURL}/file?filename=${filename}`);
+                if (!response.ok) {
+                    const data = await response.json();
+                    resultDiv.textContent = data.error;
+                    return;
+                }
+
+                const contentLength = response.headers.get('Content-Length');
+                const reader = response.body.getReader();
+                let receivedLength = 0;
+                const chunks = [];
+
+                currentXHR = reader; // 保存当前的下载请求
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    chunks.push(value);
+                    receivedLength += value.length;
+
+                    // 更新进度条
+                    if (contentLength) {
+                        const percentComplete = (receivedLength / contentLength) * 100;
+                        progressBar.style.width = percentComplete + '%';
+                    }
+                }
+
+                // 创建 Blob 并下载文件
+                const blob = new Blob(chunks);
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.click();
+                window.URL.revokeObjectURL(url);
+
+                resultDiv.textContent = '文件下载成功';
+
+                // 重置进度条
+                progressBar.style.width = '0%';
+                currentXHR = null;
+            } catch (error) {
+                resultDiv.textContent = '下载文件失败';
+                progressBar.style.width = '0%';
+                currentXHR = null;
+            }
+        });
+
+        // 关闭共享
+        closeButton.addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${baseURL}/file`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+                resultDiv.textContent = data.message;
+                // 清空文件列表
+                fileListItems.innerHTML = '';
+            } catch (error) {
+                resultDiv.textContent = '关闭共享失败';
+            }
+        });
+
+        // 停止按钮功能
+        stopButton.addEventListener('click', () => {
+            if (currentXHR) {
+                if (currentXHR.abort) {
+                    currentXHR.abort(); // 停止上传或下载请求
+                } else if (currentXHR.cancel) {
+                    currentXHR.cancel(); // 停止下载流
+                }
+                currentXHR = null; // 清除当前请求
+                resultDiv.textContent = '操作已停止';
+                progressBar.style.width = '0%';
+                enableButtons(); // 恢复按钮状态
+            }
+        });
+    </script>
+</body>
+
+</html>
