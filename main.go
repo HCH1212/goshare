@@ -16,6 +16,7 @@ func main() {
 	// 中间件：仅允许局域网访问
 	r.Use(localNetworkOnly())
 	r.Use(middleware.CorsGin())
+	r.LoadHTMLFiles("index.html")
 
 	// 路由
 	r.POST("/file", uploadfile)
@@ -28,7 +29,8 @@ func main() {
 
 	// 前端
 	r.GET("/", func(c *gin.Context) {
-		c.File("index.html")
+		// c.File("index.html")
+		c.HTML(http.StatusOK, "index.html", gin.H{"url": "http://" + getLocalIP() + ":8088"})
 	})
 
 	// 获取本地局域网 IP

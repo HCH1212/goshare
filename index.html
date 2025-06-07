@@ -179,7 +179,7 @@
         const closeButton = document.getElementById('closeButton');
         const stopButton = document.getElementById('stopButton'); // 获取停止按钮
 
-        const baseURL = 'http://172.22.160.111:8088'; // 基础 URL
+        const baseURL = "{{.url}}"; // 基础 URL        
         const maxFileSize = 5 * 1024 * 1024 * 1024; // 最大文件大小 5GB
 
         // 禁用按钮
